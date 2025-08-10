@@ -1,0 +1,791 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Pokemon Chess with AI & Sounds - Fixed</title>
+<style>
+  body {
+    font-family: Arial, sans-serif;
+    background: #f0f3f7;
+    margin: 0; padding: 0; display: flex; flex-direction: column; align-items: center;
+  }
+  h1 {
+    margin: 15px;
+  }
+  #game {
+    display: flex;
+    gap: 10px;
+    margin-bottom: 10px;
+  }
+  #captured-white, #captured-black {
+    width: 100px;
+    min-height: 96px;
+    border: 1px solid #ccc;
+    background: #fff;
+    padding: 5px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px;
+    justify-content: center;
+    align-content: start;
+  }
+  #board {
+    display: grid;
+    grid-template-columns: repeat(8, 64px);
+    grid-template-rows: repeat(8, 64px);
+    border: 2px solid #333;
+    box-shadow: 0 0 10px #aaa;
+  }
+  .square {
+    width: 64px;
+    height: 64px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    cursor: pointer;
+    user-select: none;
+    position: relative;
+  }
+  .light {
+    background: #f0d9b5;
+  }
+  .dark {
+    background: #b58863;
+  }
+  .square.selected {
+    outline: 3px solid #3a8cff;
+    z-index: 2;
+  }
+  .square.possible-move::after {
+    content: '';
+    position: absolute;
+    width: 16px; height: 16px;
+    border-radius: 50%;
+    background: rgba(58, 140, 255, 0.7);
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+  }
+  .square.last-move {
+    box-shadow: inset 0 0 10px 3px #ffdb4d;
+  }
+  img.piece {
+    width: 56px;
+    height: 56px;
+    pointer-events: none;
+  }
+  #controls {
+    margin-bottom: 15px;
+    display: flex;
+    gap: 10px;
+    align-items: center;
+  }
+  select, button {
+    font-size: 16px;
+    padding: 6px 12px;
+    cursor: pointer;
+  }
+  #promotion-dialog {
+    position: fixed;
+    top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    background: white;
+    border: 2px solid #333;
+    padding: 15px;
+    display: none;
+    z-index: 10;
+    box-shadow: 0 0 15px rgba(0,0,0,0.5);
+    text-align: center;
+  }
+  #promotion-dialog h3 {
+    margin: 0 0 10px 0;
+  }
+  #promotion-options img {
+    width: 48px;
+    height: 48px;
+    margin: 0 8px;
+    cursor: pointer;
+    border: 2px solid transparent;
+    border-radius: 6px;
+  }
+  #promotion-options img:hover {
+    border-color: #3a8cff;
+  }
+</style>
+</head>
+<body>
+<h1>Pokemon Chess with AI & Sounds</h1>
+
+<div id="controls">
+  <label for="mode-select">Play Mode:</label>
+  <select id="mode-select">
+    <option value="human">Human vs Human</option>
+    <option value="ai-easy">Human vs AI (Easy)</option>
+    <option value="ai-medium" selected>Human vs AI (Medium)</option>
+    <option value="ai-hard">Human vs AI (Hard)</option>
+  </select>
+  <button id="restart-btn">Restart</button>
+</div>
+
+<div id="game">
+  <div id="captured-white" title="Captured White Pieces"></div>
+  <div id="board" role="grid" aria-label="Chess board"></div>
+  <div id="captured-black" title="Captured Black Pieces"></div>
+</div>
+
+<div id="promotion-dialog" role="dialog" aria-modal="true" aria-labelledby="promo-title">
+  <h3 id="promo-title">Choose Promotion</h3>
+  <div id="promotion-options"></div>
+</div>
+
+<audio id="sound-move" src="https://actions.google.com/sounds/v1/chess/move.ogg" preload="auto"></audio>
+<audio id="sound-capture" src="https://actions.google.com/sounds/v1/cartoon/clang_and_wobble.ogg" preload="auto"></audio>
+<audio id="sound-promotion" src="https://actions.google.com/sounds/v1/cartoon/pop.ogg" preload="auto"></audio>
+
+<script>
+  const pokemonSprites = {
+    w: {
+      P: {src:'https://img.pokemondb.net/sprites/home/normal/pichu.png', name: 'Pichu'},
+      R: {src:'https://img.pokemondb.net/sprites/home/normal/onix.png', name: 'Onix'},
+      N: {src:'https://img.pokemondb.net/sprites/home/normal/eevee.png', name: 'Eevee'},
+      B: {src:'https://img.pokemondb.net/sprites/home/normal/alakazam.png', name: 'Alakazam'},
+      Q: {src:'https://img.pokemondb.net/sprites/home/normal/mewtwo.png', name: 'Mewtwo'},
+      K: {src:'https://img.pokemondb.net/sprites/home/normal/arceus.png', name: 'Arceus'},
+    },
+    b: {
+      P: {src:'https://img.pokemondb.net/sprites/home/shiny/pikachu.png', name: 'Pikachu'},
+      R: {src:'https://img.pokemondb.net/sprites/home/shiny/steelix.png', name: 'Steelix'},
+      N: {src:'https://img.pokemondb.net/sprites/home/shiny/umbreon.png', name: 'Umbreon'},
+      B: {src:'https://img.pokemondb.net/sprites/home/shiny/gardevoir.png', name: 'Gardevoir'},
+      Q: {src:'https://img.pokemondb.net/sprites/home/shiny/darkrai.png', name: 'Darkrai'},
+      K: {src:'https://img.pokemondb.net/sprites/home/shiny/giratina.png', name: 'Giratina'},
+    }
+  };
+  const promotionPieces = ['Q','R','B','N'];
+
+  const boardElem = document.getElementById('board');
+  const capturedWhiteElem = document.getElementById('captured-white');
+  const capturedBlackElem = document.getElementById('captured-black');
+  const modeSelect = document.getElementById('mode-select');
+  const restartBtn = document.getElementById('restart-btn');
+  const promotionDialog = document.getElementById('promotion-dialog');
+  const promotionOptions = document.getElementById('promotion-options');
+
+  let board = [];
+  let turn = 'w'; // w or b
+  let selected = null;
+  let possibleMoves = [];
+  let castlingRights = {wK:true, wQ:true, bK:true, bQ:true};
+  let enPassantTarget = null;
+  let promotionPending = null;
+  let capturedWhite = [];
+  let capturedBlack = [];
+  let playMode = 'human';
+  let lastMove = null;
+
+  // Audio elements
+  const soundMove = document.getElementById('sound-move');
+  const soundCapture = document.getElementById('sound-capture');
+  const soundPromotion = document.getElementById('sound-promotion');
+
+  function resetGame() {
+    board = [
+      ['bR','bN','bB','bQ','bK','bB','bN','bR'],
+      ['bP','bP','bP','bP','bP','bP','bP','bP'],
+      ['','','','','','','',''],
+      ['','','','','','','',''],
+      ['','','','','','','',''],
+      ['','','','','','','',''],
+      ['wP','wP','wP','wP','wP','wP','wP','wP'],
+      ['wR','wN','wB','wQ','wK','wB','wN','wR'],
+    ];
+    turn = 'w';
+    selected = null;
+    possibleMoves = [];
+    castlingRights = {wK:true, wQ:true, bK:true, bQ:true};
+    enPassantTarget = null;
+    promotionPending = null;
+    capturedWhite = [];
+    capturedBlack = [];
+    lastMove = null;
+    playMode = modeSelect.value;
+    updateCapturedDisplay();
+    renderBoard();
+  }
+
+  function renderBoard() {
+    boardElem.innerHTML = '';
+    for(let y=0; y<8; y++) {
+      for(let x=0; x<8; x++) {
+        const squareColor = (x + y) % 2 === 0 ? 'light' : 'dark';
+        const square = document.createElement('div');
+        square.className = 'square ' + squareColor;
+        square.dataset.x = x;
+        square.dataset.y = y;
+        square.setAttribute('role', 'gridcell');
+        square.setAttribute('aria-label', `Square ${String.fromCharCode(97 + x)}${8 - y}`);
+
+        if(selected && selected.x === x && selected.y === y) {
+          square.classList.add('selected');
+        }
+        if(possibleMoves.some(m => m.x === x && m.y === y)) {
+          square.classList.add('possible-move');
+        }
+        if(lastMove) {
+          if((lastMove.from.x === x && lastMove.from.y === y) || (lastMove.to.x === x && lastMove.to.y === y)) {
+            square.classList.add('last-move');
+          }
+        }
+
+        const piece = board[y][x];
+        if(piece) {
+          const color = piece[0];
+          const type = piece[1];
+          const img = document.createElement('img');
+          img.src = pokemonSprites[color][type].src;
+          img.alt = pokemonSprites[color][type].name + ' ' + (color === 'w' ? 'White' : 'Black');
+          img.className = 'piece';
+          square.appendChild(img);
+        }
+
+        square.addEventListener('click', () => onSquareClick(x,y));
+        boardElem.appendChild(square);
+      }
+    }
+  }
+
+  function updateCapturedDisplay() {
+    capturedWhiteElem.innerHTML = '';
+    capturedBlackElem.innerHTML = '';
+    capturedWhite.forEach(type => {
+      const img = document.createElement('img');
+      img.src = pokemonSprites['w'][type].src;
+      img.alt = pokemonSprites['w'][type].name + ' captured';
+      img.className = 'piece';
+      capturedWhiteElem.appendChild(img);
+    });
+    capturedBlack.forEach(type => {
+      const img = document.createElement('img');
+      img.src = pokemonSprites['b'][type].src;
+      img.alt = pokemonSprites['b'][type].name + ' captured';
+      img.className = 'piece';
+      capturedBlackElem.appendChild(img);
+    });
+  }
+
+  async function onSquareClick(x,y) {
+    if(promotionPending) return;
+
+    const clickedPiece = board[y][x];
+    if(selected) {
+      if(possibleMoves.some(m => m.x === x && m.y === y)) {
+        await movePiece(selected.x, selected.y, x, y);
+        selected = null;
+        possibleMoves = [];
+        if(!promotionPending) {
+          await switchTurn();
+        }
+      } else if(clickedPiece && clickedPiece[0] === turn) {
+        selected = {x,y};
+        possibleMoves = calculateMoves(x,y);
+      } else {
+        selected = null;
+        possibleMoves = [];
+      }
+    } else {
+      if(clickedPiece && clickedPiece[0] === turn) {
+        selected = {x,y};
+        possibleMoves = calculateMoves(x,y);
+      }
+    }
+    renderBoard();
+  }
+
+  async function switchTurn() {
+    turn = turn === 'w' ? 'b' : 'w';
+
+    if(checkCheck(turn)) {
+      if(isCheckmate(turn)) {
+        alert(`${turn === 'w' ? 'White' : 'Black'} is checkmated! Game Over.`);
+        return;
+      } else {
+        alert(`${turn === 'w' ? 'White' : 'Black'} is in check!`);
+      }
+    } else if(isStalemate(turn)) {
+      alert("Stalemate! Game drawn.");
+      return;
+    }
+
+    if(playMode.startsWith('ai') && turn === 'b') {
+      await sleep(400);
+      await aiMove();
+    }
+  }
+
+  function sleep(ms) {
+    return new Promise(res => setTimeout(res, ms));
+  }
+
+  async function movePiece(x1,y1,x2,y2) {
+    const piece = board[y1][x1];
+    const color = piece[0];
+    const type = piece[1];
+    const enemy = color === 'w' ? 'b' : 'w';
+
+    let isCastlingMove = false;
+    let castlingSide = null;
+    let enPassantCapture = false;
+    let capturedPiece = board[y2][x2];
+
+    // Castling check
+    if(type === 'K' && Math.abs(x2 - x1) === 2) {
+      isCastlingMove = true;
+      castlingSide = (x2 > x1) ? 'K' : 'Q';
+    }
+    // En passant check
+    if(type === 'P' && x2 !== x1 && board[y2][x2] === '') {
+      enPassantCapture = true;
+      const capY = (color === 'w') ? y2 + 1 : y2 - 1;
+      capturedPiece = board[capY][x2];
+      board[capY][x2] = '';
+    }
+
+    board[y2][x2] = board[y1][x1];
+    board[y1][x1] = '';
+
+    if(isCastlingMove) {
+      if(castlingSide === 'K') {
+        board[y2][5] = board[y2][7];
+        board[y2][7] = '';
+      } else {
+        board[y2][3] = board[y2][0];
+        board[y2][0] = '';
+      }
+    }
+
+    // Castling rights updates
+    if(type === 'K') {
+      castlingRights[color + 'K'] = false;
+      castlingRights[color + 'Q'] = false;
+    }
+    if(type === 'R') {
+      if(y1 === (color === 'w' ? 7 : 0) && x1 === 0) castlingRights[color + 'Q'] = false;
+      if(y1 === (color === 'w' ? 7 : 0) && x1 === 7) castlingRights[color + 'K'] = false;
+    }
+    if(capturedPiece && capturedPiece[1] === 'R') {
+      if(y2 === (enemy === 'w' ? 7 : 0) && x2 === 0) castlingRights[enemy + 'Q'] = false;
+      if(y2 === (enemy === 'w' ? 7 : 0) && x2 === 7) castlingRights[enemy + 'K'] = false;
+    }
+
+    if(type === 'P' && Math.abs(y2 - y1) === 2) {
+      enPassantTarget = {x: x1, y: (y1 + y2) / 2};
+    } else {
+      enPassantTarget = null;
+    }
+
+    if(capturedPiece) {
+      if(enemy === 'w') capturedWhite.push(capturedPiece[1]);
+      else capturedBlack.push(capturedPiece[1]);
+      updateCapturedDisplay();
+    }
+
+    if(capturedPiece) {
+      soundCapture.currentTime = 0;
+      soundCapture.play();
+    } else {
+      soundMove.currentTime = 0;
+      soundMove.play();
+    }
+
+    lastMove = {from: {x:x1, y:y1}, to: {x:x2, y:y2}};
+
+    renderBoard();
+
+    if(type === 'P' && (y2 === 0 || y2 === 7)) {
+      promotionPending = {x: x2, y: y2, color};
+      await showPromotionDialog();
+    }
+  }
+
+  function showPromotionDialog() {
+    promotionDialog.style.display = 'block';
+    promotionOptions.innerHTML = '';
+    promotionPieces.forEach(p => {
+      const img = document.createElement('img');
+      img.src = pokemonSprites[promotionPending.color][p].src;
+      img.alt = `Promote to ${pokemonSprites[promotionPending.color][p].name}`;
+      img.title = `Promote to ${pokemonSprites[promotionPending.color][p].name}`;
+      img.addEventListener('click', () => {
+        promotePawn(p);
+        promotionDialog.style.display = 'none';
+      });
+      promotionOptions.appendChild(img);
+    });
+  }
+
+  function promotePawn(newType) {
+    board[promotionPending.y][promotionPending.x] = promotionPending.color + newType;
+    promotionPending = null;
+    soundPromotion.currentTime = 0;
+    soundPromotion.play();
+    renderBoard();
+  }
+
+  function calculateMoves(x,y) {
+    const piece = board[y][x];
+    if(!piece) return [];
+    const color = piece[0];
+    const type = piece[1];
+    const enemy = color === 'w' ? 'b' : 'w';
+
+    let moves = [];
+
+    const inside = (x,y) => x >= 0 && x < 8 && y >= 0 && y < 8;
+    const empty = (x,y) => inside(x,y) && board[y][x] === '';
+    const enemyAt = (x,y) => inside(x,y) && board[y][x] !== '' && board[y][x][0] === enemy;
+
+    if(type === 'P') {
+      const dir = color === 'w' ? -1 : 1;
+      if(empty(x,y+dir)) moves.push({x,y:y+dir});
+      const startRow = color === 'w' ? 6 : 1;
+      if(y === startRow && empty(x,y+dir) && empty(x,y+2*dir)) moves.push({x,y:y+2*dir});
+      if(enemyAt(x-1,y+dir)) moves.push({x:x-1,y:y+dir});
+      if(enemyAt(x+1,y+dir)) moves.push({x:x+1,y:y+dir});
+      // en passant
+      if(enPassantTarget) {
+        if(enPassantTarget.y === y + dir && (enPassantTarget.x === x-1 || enPassantTarget.x === x+1)) {
+          moves.push({x: enPassantTarget.x, y: enPassantTarget.y});
+        }
+      }
+    } else if(type === 'R') {
+      [[1,0],[-1,0],[0,1],[0,-1]].forEach(([dx,dy])=>{
+        let nx = x+dx, ny = y+dy;
+        while(inside(nx,ny)) {
+          if(empty(nx,ny)) moves.push({x:nx,y:ny});
+          else {
+            if(enemyAt(nx,ny)) moves.push({x:nx,y:ny});
+            break;
+          }
+          nx += dx; ny += dy;
+        }
+      });
+    } else if(type === 'N') {
+      [[2,1],[2,-1],[-2,1],[-2,-1],[1,2],[-1,2],[1,-2],[-1,-2]].forEach(([nx,ny])=>{
+        const xx = x+nx, yy = y+ny;
+        if(inside(xx,yy) && (empty(xx,yy) || enemyAt(xx,yy))) moves.push({x:xx,y:yy});
+      });
+    } else if(type === 'B') {
+      [[1,1],[1,-1],[-1,1],[-1,-1]].forEach(([dx,dy])=>{
+        let nx = x+dx, ny = y+dy;
+        while(inside(nx,ny)) {
+          if(empty(nx,ny)) moves.push({x:nx,y:ny});
+          else {
+            if(enemyAt(nx,ny)) moves.push({x:nx,y:ny});
+            break;
+          }
+          nx += dx; ny += dy;
+        }
+      });
+    } else if(type === 'Q') {
+      [[1,0],[-1,0],[0,1],[0,-1],[1,1],[1,-1],[-1,1],[-1,-1]].forEach(([dx,dy])=>{
+        let nx = x+dx, ny = y+dy;
+        while(inside(nx,ny)) {
+          if(empty(nx,ny)) moves.push({x:nx,y:ny});
+          else {
+            if(enemyAt(nx,ny)) moves.push({x:nx,y:ny});
+            break;
+          }
+          nx += dx; ny += dy;
+        }
+      });
+    } else if(type === 'K') {
+      [[1,0],[-1,0],[0,1],[0,-1],[1,1],[1,-1],[-1,1],[-1,-1]].forEach(([dx,dy])=>{
+        const nx = x+dx, ny = y+dy;
+        if(inside(nx,ny) && (empty(nx,ny) || enemyAt(nx,ny))) moves.push({x:nx,y:ny});
+      });
+      // Castling
+      if(!checkCheck(turn)) {
+        if(castlingRights[color + 'K']) {
+          if(board[y][x+1] === '' && board[y][x+2] === '') {
+            if(!squareAttacked(x+1,y,enemy) && !squareAttacked(x+2,y,enemy)) {
+              moves.push({x:x+2,y:y});
+            }
+          }
+        }
+        if(castlingRights[color + 'Q']) {
+          if(board[y][x-1] === '' && board[y][x-2] === '' && board[y][x-3] === '') {
+            if(!squareAttacked(x-1,y,enemy) && !squareAttacked(x-2,y,enemy)) {
+              moves.push({x:x-2,y:y});
+            }
+          }
+        }
+      }
+    }
+
+    // Filter moves that leave king in check
+    moves = moves.filter(m => {
+      const bCopy = copyBoard(board);
+      makeMoveOnBoard(bCopy, x, y, m.x, m.y);
+      return !checkCheckForBoard(bCopy, color);
+    });
+
+    return moves;
+  }
+
+  function squareAttacked(x,y,enemy) {
+    for(let yy=0; yy<8; yy++) {
+      for(let xx=0; xx<8; xx++) {
+        const p = board[yy][xx];
+        if(p && p[0] === enemy) {
+          const moves = calculateMoves(xx,yy);
+          if(moves.some(m => m.x === x && m.y === y)) return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  function checkCheck(color) {
+    return checkCheckForBoard(board, color);
+  }
+
+  function checkCheckForBoard(bd,color) {
+    let kingPos = null;
+    for(let y=0;y<8;y++) {
+      for(let x=0;x<8;x++) {
+        if(bd[y][x] === color+'K') {
+          kingPos = {x,y};
+          break;
+        }
+      }
+      if(kingPos) break;
+    }
+    if(!kingPos) return false;
+
+    const enemy = color === 'w' ? 'b' : 'w';
+    for(let y=0;y<8;y++) {
+      for(let x=0;x<8;x++) {
+        if(bd[y][x] && bd[y][x][0] === enemy) {
+          const moves = calculateMovesForBoard(bd,x,y);
+          if(moves.some(m => m.x === kingPos.x && m.y === kingPos.y)) return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  function isCheckmate(color) {
+    if(!checkCheck(color)) return false;
+    for(let y=0;y<8;y++) {
+      for(let x=0;x<8;x++) {
+        if(board[y][x] && board[y][x][0] === color) {
+          if(calculateMoves(x,y).length > 0) return false;
+        }
+      }
+    }
+    return true;
+  }
+
+  function isStalemate(color) {
+    if(checkCheck(color)) return false;
+    for(let y=0;y<8;y++) {
+      for(let x=0;x<8;x++) {
+        if(board[y][x] && board[y][x][0] === color) {
+          if(calculateMoves(x,y).length > 0) return false;
+        }
+      }
+    }
+    return true;
+  }
+
+  function copyBoard(bd) {
+    return bd.map(row => row.slice());
+  }
+
+  function makeMoveOnBoard(bd, x1,y1,x2,y2) {
+    bd[y2][x2] = bd[y1][x1];
+    bd[y1][x1] = '';
+  }
+
+  async function aiMove() {
+    let move;
+    if(playMode === 'ai-easy') {
+      move = randomAIMove();
+    } else if(playMode === 'ai-medium') {
+      move = minimaxRoot(2, true);
+    } else if(playMode === 'ai-hard') {
+      move = minimaxRoot(4, true);
+    }
+    if(move) {
+      await movePiece(move.from.x, move.from.y, move.to.x, move.to.y);
+      await switchTurn();
+    }
+  }
+
+  function allMoves(color, bd = board) {
+    let moves = [];
+    for(let y=0;y<8;y++) {
+      for(let x=0;x<8;x++) {
+        if(bd[y][x] && bd[y][x][0] === color) {
+          const pieceMoves = calculateMovesForBoard(bd, x, y);
+          pieceMoves.forEach(mv => moves.push({from:{x,y}, to: mv}));
+        }
+      }
+    }
+    return moves;
+  }
+
+  function randomAIMove() {
+    const moves = allMoves('b');
+    if(moves.length === 0) return null;
+    return moves[Math.floor(Math.random() * moves.length)];
+  }
+
+  function minimaxRoot(depth, isMaximizing) {
+    const moves = allMoves('b');
+    let bestMove = null;
+    let bestScore = -Infinity;
+    for(let move of moves) {
+      let bdCopy = copyBoard(board);
+      makeMoveOnBoard(bdCopy, move.from.x, move.from.y, move.to.x, move.to.y);
+      let score = minimax(bdCopy, depth -1, -Infinity, Infinity, !isMaximizing);
+      if(score > bestScore) {
+        bestScore = score;
+        bestMove = move;
+      }
+    }
+    return bestMove;
+  }
+
+  function minimax(bd, depth, alpha, beta, isMax) {
+    if(depth === 0) return evaluateBoard(bd);
+    const color = isMax ? 'b' : 'w';
+    const moves = allMoves(color, bd);
+    if(moves.length === 0) {
+      if(checkCheckForBoard(bd, color)) {
+        return isMax ? -99999 : 99999;
+      }
+      return 0;
+    }
+    if(isMax) {
+      let maxEval = -Infinity;
+      for(let move of moves) {
+        let bdCopy = copyBoard(bd);
+        makeMoveOnBoard(bdCopy, move.from.x, move.from.y, move.to.x, move.to.y);
+        let evalScore = minimax(bdCopy, depth-1, alpha, beta, false);
+        maxEval = Math.max(maxEval, evalScore);
+        alpha = Math.max(alpha, evalScore);
+        if(beta <= alpha) break;
+      }
+      return maxEval;
+    } else {
+      let minEval = Infinity;
+      for(let move of moves) {
+        let bdCopy = copyBoard(bd);
+        makeMoveOnBoard(bdCopy, move.from.x, move.from.y, move.to.x, move.to.y);
+        let evalScore = minimax(bdCopy, depth-1, alpha, beta, true);
+        minEval = Math.min(minEval, evalScore);
+        beta = Math.min(beta, evalScore);
+        if(beta <= alpha) break;
+      }
+      return minEval;
+    }
+  }
+
+  function evaluateBoard(bd) {
+    const values = {P:10, N:30, B:30, R:50, Q:90, K:900};
+    let score = 0;
+    for(let y=0;y<8;y++) {
+      for(let x=0;x<8;x++) {
+        const piece = bd[y][x];
+        if(piece) {
+          const val = values[piece[1]];
+          score += (piece[0] === 'b' ? val : -val);
+        }
+      }
+    }
+    return score;
+  }
+
+  function calculateMovesForBoard(bd, x,y) {
+    const piece = bd[y][x];
+    if(!piece) return [];
+    const color = piece[0];
+    const type = piece[1];
+    const enemy = color === 'w' ? 'b' : 'w';
+
+    let moves = [];
+
+    const inside = (x,y) => x >= 0 && x < 8 && y >= 0 && y < 8;
+    const empty = (x,y) => inside(x,y) && bd[y][x] === '';
+    const enemyAt = (x,y) => inside(x,y) && bd[y][x] !== '' && bd[y][x][0] === enemy;
+
+    if(type === 'P') {
+      const dir = color === 'w' ? -1 : 1;
+      if(empty(x,y+dir)) moves.push({x, y: y+dir});
+      const startRow = color === 'w' ? 6 : 1;
+      if(y === startRow && empty(x,y+dir) && empty(x,y+2*dir)) moves.push({x, y: y+2*dir});
+      if(enemyAt(x-1,y+dir)) moves.push({x: x-1, y: y+dir});
+      if(enemyAt(x+1,y+dir)) moves.push({x: x+1, y: y+dir});
+      // No en passant for AI for simplicity
+    } else if(type === 'R') {
+      [[1,0],[-1,0],[0,1],[0,-1]].forEach(([dx,dy])=>{
+        let nx = x+dx, ny = y+dy;
+        while(inside(nx,ny)) {
+          if(empty(nx,ny)) moves.push({x:nx,y:ny});
+          else {
+            if(enemyAt(nx,ny)) moves.push({x:nx,y:ny});
+            break;
+          }
+          nx += dx; ny += dy;
+        }
+      });
+    } else if(type === 'N') {
+      [[2,1],[2,-1],[-2,1],[-2,-1],[1,2],[-1,2],[1,-2],[-1,-2]].forEach(([nx,ny])=>{
+        const xx = x+nx, yy = y+ny;
+        if(inside(xx,yy) && (empty(xx,yy) || enemyAt(xx,yy))) moves.push({x:xx,y:yy});
+      });
+    } else if(type === 'B') {
+      [[1,1],[1,-1],[-1,1],[-1,-1]].forEach(([dx,dy])=>{
+        let nx = x+dx, ny = y+dy;
+        while(inside(nx,ny)) {
+          if(empty(nx,ny)) moves.push({x:nx,y:ny});
+          else {
+            if(enemyAt(nx,ny)) moves.push({x:nx,y:ny});
+            break;
+          }
+          nx += dx; ny += dy;
+        }
+      });
+    } else if(type === 'Q') {
+      [[1,0],[-1,0],[0,1],[0,-1],[1,1],[1,-1],[-1,1],[-1,-1]].forEach(([dx,dy])=>{
+        let nx = x+dx, ny = y+dy;
+        while(inside(nx,ny)) {
+          if(empty(nx,ny)) moves.push({x:nx,y:ny});
+          else {
+            if(enemyAt(nx,ny)) moves.push({x:nx,y:ny});
+            break;
+          }
+          nx += dx; ny += dy;
+        }
+      });
+    } else if(type === 'K') {
+      [[1,0],[-1,0],[0,1],[0,-1],[1,1],[1,-1],[-1,1],[-1,-1]].forEach(([dx,dy])=>{
+        const nx = x+dx, ny = y+dy;
+        if(inside(nx,ny) && (empty(nx,ny) || enemyAt(nx,ny))) moves.push({x:nx,y:ny});
+      });
+    }
+    return moves;
+  }
+
+  restartBtn.addEventListener('click', resetGame);
+  modeSelect.addEventListener('change', () => {
+    playMode = modeSelect.value;
+    resetGame();
+  });
+
+  resetGame();
+</script>
+</body>
+</html>
